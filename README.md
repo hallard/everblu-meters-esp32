@@ -1,100 +1,174 @@
-# everblu-meters-esp32 - Water usage data for MQTT
+# everblu-meters-esp32
 
-<!--
-![With CC1101 Shield on PI Zero](pictures/cc1101-pi-zero.jpg)
--->
+ESP32 firmware to read water usage data from **Itron EverBlu Cyble Enhanced** meters using the RADIAN protocol over 433 MHz, with MQTT integration for home automation.
 
-Fetch water/gas usage data from Cyble EverBlu meters using RADIAN protocol on 433Mhz. Integrated with MQTT. 
+## Features
 
-Meters supported:
-- Itron EverBlu Cyble Enhanced
+- Daily scheduled meter reading with deep sleep between cycles
+- MQTT publishing (JSON + optional raw topics) with retained messages
+- Automatic 433 MHz frequency scanning and calibration
+- Configurable retry logic on read failure
+- OTA firmware updates
+- RGB LED status indication (NeoPixel)
+- ESP32 and meter battery monitoring
+- Multiple ESP32 board support (ESP32, ESP32-C3, ESP32-S2)
 
-Software original code (but also all the hard work to get thingd working was originaly done [here][4] then put on github by @neutrinus [here][5] and then forked by [psykokwak](https://github.com/psykokwak-com/everblu-meters-esp8266)
+## Table of Contents
 
-I added some changes to the original firmware to work with my custom esp32-c3 board (including RGB led control, battery monitoring, deepsleep, battery charger), just plug, and play.
+- [Hardware](#hardware)
+- [Wiring](#wiring)
+- [Configuration](#configuration)
+- [Building & Flashing](#building--flashing)
+- [MQTT Topics](#mqtt-topics)
+- [LED Status Codes](#led-status-codes)
+- [Troubleshooting](#troubleshooting)
+- [Save Power](#save-power)
+- [Origin & License](#origin--license)
+- [Links](#links)
 
 ## Hardware
 
-The project runs on ESP32 with an RF transreciver (CC1101). 
+### Required
 
-Hardware can be any ESP32+CC1101 with correct wiring.
+| Component | Description |
+|-----------|-------------|
+| ESP32 board | Any supported variant (see [Supported Boards](#supported-boards)) |
+| CC1101 module | 433 MHz RF transceiver (e.g. [E07-M1101S][1]) |
+| USB cable | For initial programming |
+| WiFi network | 2.4 GHz |
 
-I used my open source one [cc1101-e07-pi](https://github.com/hallard/cc1101-e07-pi), you can check it out for the already made hardware or look at the original [repo][5] if you want to build your own.
+### Optional
 
-<!--
-![With CC1101 Custom Mini Shield](pictures/cc1101-pi-antennas.jpg)
--->
+| Component | Description |
+|-----------|-------------|
+| LC709203F | I2C lithium battery fuel gauge |
+| WS2812B LED | NeoPixel RGB status indicator |
+| LiPo battery | For standalone battery-powered operation |
+
+Ready-made hardware designs are available: [ESP32C3-CC1101][9] (ESP32-C3 + CC1101 integrated board) and [cc1101-e07-pi][7]. See the original [repo][5] for DIY wiring instructions.
+
+### Supported Boards
+
+| Environment | Board | Notes |
+|-------------|-------|-------|
+| `esp32c3-cc1101` | [ESP32C3-CC1101][9] | **Default.** LC709203F + NeoPixel |
+| `esp32dev` | ESP32 DevKit | NeoPixel support |
+| `esp32pico` | Pico32 | Base config |
+| `mhetlive` | MHET ESP32 Mini Kit | Base config |
+| `lolin32-lite` | Lolin32 Lite | Base config |
+| `garagestick` | Adafruit Metro ESP32-S2 | USB CDC |
+
+## Wiring
+
+### [ESP32C3-CC1101][9] (default `esp32c3-cc1101` environment)
+
+| CC1101 Pin | ESP32-C3 GPIO | Function |
+|------------|---------------|----------|
+| GDO0 | GPIO 1 | Data ready interrupt |
+| SCK | GPIO 6 | SPI clock |
+| MOSI | GPIO 7 | SPI data out |
+| MISO | GPIO 2 | SPI data in |
+| CSn | GPIO 8 | SPI chip select |
+
+| Peripheral | ESP32-C3 GPIO | Function |
+|------------|---------------|----------|
+| LC709203F SCL | GPIO 4 | I2C clock |
+| LC709203F SDA | GPIO 5 | I2C data |
+| NeoPixel | GPIO 3 | LED data |
+| Button | GPIO 9 | User button |
+
+Pin assignments for other boards are defined in their respective `[env:...]` sections of `platformio.ini`.
 
 ## Configuration
 
-All configuration is done thru `platformio.ini` file
+All configuration is done via build flags in `platformio.ini`.
 
-You need to get your meter serial and year, it can be found on the meter label itself
+### Meter Identity
+
+Get the serial number and year from the label on your meter:
 
 ![Cyble Meter Label](pictures/meter_label.png)
 
-Then put values in `platformio.ini` removing leading 0 from serial (mine was `0828979` I put `828979`
 ```ini
-    -D METER_YEAR=22
-    -D METER_SERIAL=828979
+-D METER_YEAR=22
+-D METER_SERIAL=828979
 ```
 
-Set the hour/min and retries mode of wakeup to read data
+> **Note:** Remove the leading `0` from the serial number. If your label reads `0828979`, enter `828979`.
+
+### Wake Schedule & Retries
+
 ```ini
-    -D WAKE_HOUR=08
-    -D WAKE_MIN=15
-    -D RETRIES=6        
-    -D RETRIES_DELAY=15 
+-D WAKE_HOUR=08         ; Hour to wake and read (local time, 0-23)
+-D WAKE_MIN=15          ; Minute to wake and read (0-59)
+-D RETRIES=6            ; Max retry attempts on failure
+-D RETRIES_DELAY=15     ; Minutes between retries
 ```
 
-Here, each day at 08H15, if read fails it will retry 15min later and do that until it worked or 6 times maximum.
+With the example above the device wakes daily at **08:15**. On failure it retries every 15 minutes up to 6 times (last attempt at **09:45**), then sleeps until 08:15 the next day.
 
-So in case of all reads fail, last retry will be at 09H45 and then stop retries. 
+### WiFi
 
-Process will start back at 08H15 next day.
-
-Set your WiFi credentials and time zone see [timezone.h](timezone.h)
 ```ini
-    -D WIFI_SSID=\"YOUR-SSID\"
-    -D WIFI_PASS=\"YOUR-PASSWORD\"
-    -D TIME_ZONE=TZ_Europe_Paris ; See timezone.h of ./src folder
+-D WIFI_SSID=\"YOUR-SSID\"
+-D WIFI_PASS=\"YOUR-PASSWORD\"
+-D TIME_ZONE=TZ_Europe_Paris    ; See src/timezone.h for all options
 ```
 
-And then MQTT related 
+### MQTT
+
 ```ini
-    -D MQTT_SERVER=\"192.168.1.8\"
-    -D TOPIC_BASE=\"everblu/\"
-    -D MQTT_USER=\"\"
-    -D MQTT_PASS=\"\"
-    -D MQTT_PORT=1883
-    ;-D PUBLISH_RAW  ; Enable to publish also RAW values (keeping JSON)
+-D MQTT_SERVER=\"192.168.1.8\"
+-D MQTT_PORT=1883
+-D TOPIC_BASE=\"everblu/\"
+-D MQTT_USER=\"\"               ; Leave empty for no auth
+-D MQTT_PASS=\"\"               ; Leave empty for no auth
+; -D PUBLISH_RAW                ; Uncomment to publish individual metric topics
 ```
 
-If you need MQTT auth please do like that
-```ini
-    -D MQTT_SERVER=\"192.168.1.8\"
-    -D TOPIC_BASE=\"everblu/\"
-    -D MQTT_USER=\"MQTT_USER\"
-    -D MQTT_PASS=\"MQTT_PASS\"
-    -D MQTT_PORT=1883
-    ;-D PUBLISH_RAW  ; Enable to publish also RAW values (keeping JSON)
+### Optional Flags
+
+| Flag | Description |
+|------|-------------|
+| `-D FORCE_SCAN` | Force a full frequency scan on next boot |
+| `-D PUBLISH_RAW` | Publish individual raw metric topics in addition to JSON |
+| `-D DEBUG_OUT=1` | Enable CC1101 SPI debug output on serial |
+
+## Building & Flashing
+
+This project uses [PlatformIO](https://platformio.org/).
+
+```bash
+# Build (default esp32c3-cc1101 environment)
+pio run
+
+# Build a specific environment
+pio run -e esp32dev
+
+# Upload
+pio run --target upload
+
+# Serial monitor
+pio device monitor
 ```
 
-## MQTT Topics and data
+OTA updates are available once the device is connected to WiFi (via ArduinoOTA).
 
-### Base Topic
+## MQTT Topics
 
-Base topic is `everblu` followed by serial number (with leading 0 this time) followed by `-espabcd`, because I've also device with PI so I need to know who is sending data, of course you can remove it if needed.
+All topics are published under a base path built from your configuration:
 
 ```
-everblu/cyble-22-0828979-espbf84
+<TOPIC_BASE>/cyble-<YEAR>-0<SERIAL>-esp<MAC>/
 ```
 
-### Reading OK
+Example: `everblu/cyble-22-0828979-espbf84/`
 
-When read suceeded, results are sent in `JSON`format to the base topic plus `json`
+The `esp<MAC>` suffix is auto-generated from the ESP32 MAC address, allowing multiple devices on the same broker.
 
-Example received on `everblu/cyble-22-0828979-espbf84/json`
+### `json` -- Successful Read (retained)
+
+Published to `<base>/json` on each successful meter read.
 
 ```json
 {
@@ -102,42 +176,32 @@ Example received on `everblu/cyble-22-0828979-espbf84/json`
     "date": "Tue Jul 18 07:00:20 2023",
     "esp_battery": {
         "percent": 97,
-        "vbat": 4155 },
+        "vbat": 4155
+    },
     "liters": 467932,
     "battery": 173,
     "read": 228,
     "rssi": -87,
     "lqi": -120,
-    "hours":"06:18"
+    "hours": "06:18"
 }
 ```
 
-Values can also be sent in raw format enabling setting `PUBLISH_RAW` in `platformio.ini`
+| Field | Description |
+|-------|-------------|
+| `ts` | Unix timestamp |
+| `date` | Human-readable date/time |
+| `esp_battery` | ESP32 battery state (if hardware present) |
+| `liters` | Total water consumption in liters |
+| `battery` | Meter battery remaining (months) |
+| `read` | Meter internal read counter |
+| `rssi` | Received signal strength (dBm) |
+| `lqi` | Link quality indicator |
+| `hours` | Meter business hours window (e.g. `"06:18"` = 06:00-18:59) |
 
-```ini
-    -D PUBLISH_RAW  ; Enable to publish also RAW values (keeping JSON)
-```
+### `error` -- Read Failure
 
-- `everblu/cyble-22-0828979-espbf84/liters`
-- `everblu/cyble-22-0828979-espbf84/battery`
-- `everblu/cyble-22-0828979-espbf84/read`
-- `everblu/cyble-22-0828979-espbf84/date`
-- `everblu/cyble-22-0828979-espbf84/ts`
-- `everblu/cyble-22-0828979-espbf84/hours`
-- `everblu/cyble-22-0828979-espbf84/rssi`
-- `everblu/cyble-22-0828979-espbf84/lqi`
-
-if board has battery built in chip (my esp32-c3 CC1101 boards)
-
-- `everblu/cyble-22-0828979-espbf84/esp_bat_pc`
-- `everblu/cyble-22-0828979-espbf84/esp_bat_mv`
-
-
-### Read fail
-
-When read failed, results are sent in `JSON`
-
-Example received on `everblu/cyble-22-0828979-espbf84/error`
+Published to `<base>/error` when a read attempt fails.
 
 ```json
 {
@@ -145,71 +209,58 @@ Example received on `everblu/cyble-22-0828979-espbf84/error`
     "date": "Mon Jul 17 22:47:57 2023",
     "esp_battery": {
         "percent": 90,
-        "vbat": 4094 },
+        "vbat": 4094
+    },
     "type": "No Data",
     "retries": 4
 }
 ```
 
-When read fail, device will follow `RETRIES` and `RETRIES_DELAY` parameters of `platformio.ini` (see above)
+The device follows the configured `RETRIES` / `RETRIES_DELAY` schedule before going back to sleep.
 
+### `scanning` -- Frequency Scan Progress (retained)
 
-### Scanning
-
-When scanning, results are sent in real time to the base topic plus `scanning`
-
-Example received on `everblu/cyble-22-0828979-espbf84/scanning`
-
-the format is `JSON`
+Published to `<base>/scanning` in real time during a frequency scan.
 
 ```json
-{ 
+{
     "ts": 1689416825,
-	"date": "Sat Jul 15 12:27:05 2023", 
-	"frequency": "433.8226", 
-    "register", "0x10AE7C",
+    "date": "Sat Jul 15 12:27:05 2023",
+    "frequency": "433.8226",
+    "register": "0x10AE7C",
     "rssi": -87,
     "lqi": -120,
-	"result": 115
+    "result": 115
 }
 ```
 
-`result` is below `0` on fail, `-2` if data can't be read, `-1` if read but saw an error else it's #reads of the counter (so positive)
+| `result` value | Meaning |
+|----------------|---------|
+| `> 0` | Success -- value is the meter read counter |
+| `-1` | Read returned an error |
+| `-2` | No data received |
 
-### End of Scan
+### `scan` -- Frequency Scan Complete
 
-When scanning done results are sent to the base topic plus `scan`
+Published to `<base>/scan` when scanning finishes.
 
-Example received on `everblu/cyble-22-0828979-espbf84/scan`
-
-If `frequency` is `0` this mean no working frequency has been found.
-
+**Frequency found:**
 
 ```json
-{ 
+{
     "ts": 1689419164,
-	"date": "Sat Jul 15 13:06:04 2023", 
-	"frequency": "0.0000",
+    "date": "Sat Jul 15 13:06:04 2023",
+    "frequency": "433.8000",
+    "min": "433.7900",
+    "max": "433.8100"
 }
 ```
 
-If `frequency` is found it will be the center frequency of the working frequencies boundaries. Boundaries will be sent also.
+`frequency` is the center of the working range. If `frequency` is `"0.0000"`, no valid frequency was found.
 
-```json
-{ 
-    "ts": 1689419164,
-	"date": "Sat Jul 15 13:06:04 2023", 
-	"frequency": "433.8000", 
-	"min": "433.7900", 
-	"max": "433.8100"
-}
-```
+### `sleep_until` -- Next Wake Time (retained)
 
-### Next Wake
-
-Before going into deep sleep until next try or programmed hour `WAKE_HOUR` of `platformio.ini` the device will send a `JSON` message to topic `sleep_until` 
-
-Example received on `everblu/cyble-22-0828979-espbf84/sleep_until`
+Published to `<base>/sleep_until` before entering deep sleep.
 
 ```json
 {
@@ -219,78 +270,87 @@ Example received on `everblu/cyble-22-0828979-espbf84/sleep_until`
 }
 ```
 
+### Raw Topics (optional)
+
+When `PUBLISH_RAW` is enabled, individual values are also published:
+
+| Topic suffix | Value |
+|-------------|-------|
+| `liters` | Total water consumption |
+| `battery` | Meter battery (months remaining) |
+| `read` | Meter read counter |
+| `ts` | Unix timestamp |
+| `date` | Human-readable date |
+| `hours` | Business hours window |
+| `rssi` | Signal strength |
+| `lqi` | Link quality |
+| `esp_bat_pc` | ESP32 battery percent (if available) |
+| `esp_bat_mv` | ESP32 battery voltage in mV (if available) |
+
+## LED Status Codes
+
+| Color | Meaning |
+|-------|---------|
+| Yellow | Boot / startup |
+| Cyan | Connecting to WiFi |
+| Pink | WiFi connected / NTP sync |
+| Blue | Testing frequency (during scan) |
+| Green | Successful read |
+| Orange | Read error during scan |
+| Red | Fatal error |
+
 ## Troubleshooting
 
-### Frequency adjustment
+### Frequency Calibration
 
-Your transreciver module may be not calibrated correctly, please find working frequency enabling a scan by setting `FORCE_SCAN` in `platformio.ini`
+If the device cannot communicate with the meter, the CC1101 module may need frequency calibration. Enable a full scan by adding `FORCE_SCAN` to your build flags:
 
 ```ini
-    -D FORCE_SCAN ; // Force a frequency scan on boot
+-D FORCE_SCAN
 ```
 
-Once found device will save frequency and use it on each boot.
+The device will scan around 433.82 MHz, find the working range, and persist the calibrated frequency. Subsequent boots use the saved frequency automatically. Remove the flag after a successful scan.
 
-### Business hours
+### Business Hours
 
-Your meter may be configured in such a way that is listens for request only during hours when data collectors work - to conserve energy. 
-If you are unable to communicate with the meter, please try again during business hours.
+Meters only respond during their configured business hours (typically 06:00-18:59 local time). If you cannot get a reading, try between **10:00 and 16:00** on a weekday. Some meters do not respond on weekends.
 
-```json
-{
-    "hours":"06:18" 
-}
-```
+The `hours` field in the JSON response indicates the meter's active window (e.g. `"06:18"` means 06:00 to 18:59).
 
-Mine is working from (06-18) and this results looks like LocalTime (tested in summer) because working form 06:00 to 18:59 but yours may be different. I would suggest on first try to test between 10:00 and 16:00.
+### Serial Number Leading Zero
 
-Anyway mine can't be read on Saturday/Sunday but works on off day such as July 14th.
+The configuration expects the serial **without** the leading zero. If your meter label reads `0828979`, set `METER_SERIAL=828979`. The MQTT topic will automatically include the leading zero.
 
-### Serial number starting with 0
+## Save Power
 
-Please ignore the leading 0, provide serial in configuration without it.
+The meter has an internal battery rated for ~10 years at one read per day.
 
-### Save power
+> **Do not query your meter more than once a day.** Excessive queries will drain the meter battery prematurely, potentially requiring a costly meter replacement by your water utility.
 
-The meter has internal battery, which should last for 10 years when queried once a day. 
+## Origin & License
 
-As basic advice, **Please do not query your meter more than once a day**
+Original reverse-engineering work by [lamaisonsimon][4], published on GitHub by [@neutrinus][5], then ported to ESP8266/ESP32 by [psykokwak][6]. This fork adds ESP32-C3 support, deep sleep, battery monitoring, RGB LED, and MQTT enhancements.
 
-According Water manager here they need to change about 10/15 on each measure session, my previous one from 2017 was not working anymore, now they came and put a new one.
+The license is unspecified. Citing one of the original authors:
 
-## Origin and license
+> I didn't put a license on this code maybe I should, I didn't know much about it in terms of licensing. This code was made by "looking" at the radian protocol which is said to be open source.
 
-This code is based on code from [lamaisonsimon][4]
+## Links
 
-
-The license is unknown, citing one of the authors (fred):
-
-> I didn't put a license on this code maybe I should, I didn't know much about it in terms of licensing.
-> this code was made by "looking" at the radian protocol which is said to be open source earlier in the page, I don't know if that helps?
-
-# Links
-
-There is a very nice port to ESP8266/ESP32: https://github.com/psykokwak-com/everblu-meters-esp8266
-
-# Origin and License
-
-Software original code (but also all the hard work to get thingd working was originaly done [here][4] then put on github by @neutrinus [here][5].
-
-The license is unknown, citing one of the authors (fred):
-
-> I didn't put a license on this code maybe I should, I didn't know much about it in terms of licensing.
-> this code was made by "looking" at the radian protocol which is said to be open source earlier in the page, I don't know if that helps?
-
-## Misc
-
-See news and other projects on my [blog][2] 
+- [Blog & other projects][2]
+- [CC1101 E07 module][1]
+- [ESP32C3-CC1101 hardware][9]
+- [cc1101-e07-pi hardware][7]
+- [everblu-meters (original)][5]
+- [everblu-meters-esp8266 (psykokwak fork)][6]
+- [everblu-meters-pi][8]
 
 [1]: https://www.cdebyte.com/products/E07-M1101S
 [2]: https://hallard.me
 [3]: https://oshpark.com/shared_projects/BVwV2j3b
 [4]: http://www.lamaisonsimon.fr/wiki/doku.php?id=maison2:compteur_d_eau:compteur_d_eau
 [5]: https://github.com/neutrinus/everblu-meters
-[6]: https://github.com/hallard/everblu-meters-pi
+[6]: https://github.com/psykokwak-com/everblu-meters-esp8266
 [7]: https://github.com/hallard/cc1101-e07-pi
-
-
+[8]: https://github.com/hallard/everblu-meters-pi
+[9]: https://github.com/hallard/ESP32C3-CC1101
