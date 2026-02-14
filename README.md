@@ -33,7 +33,7 @@ ESP32 firmware to read water usage data from **Itron EverBlu Cyble Enhanced** me
 | Component | Description |
 |-----------|-------------|
 | ESP32 board | Any supported variant (see [Supported Boards](#supported-boards)) |
-| CC1101 module | 433 MHz RF transceiver (e.g. [E07-M1101S][1]) |
+| CC1101 module | 433 MHz RF transceiver ([E07-400T10S][1]) or 868/915 MHz variant ([E07-900T10S][10]) |
 | USB cable | For initial programming |
 | WiFi network | 2.4 GHz |
 
@@ -45,7 +45,7 @@ ESP32 firmware to read water usage data from **Itron EverBlu Cyble Enhanced** me
 | WS2812B LED | NeoPixel RGB status indicator |
 | LiPo battery | For standalone battery-powered operation |
 
-Ready-made hardware designs are available: [ESP32C3-CC1101][9] (ESP32-C3 + CC1101 integrated board) and [cc1101-e07-pi][7]. See the original [repo][5] for DIY wiring instructions.
+Ready-made hardware designs are available: [ESP32C3-CC1101][9] (ESP32-C3 + CC1101 integrated board) and [cc1101-e07-pi][7]. See the [ESP32C3-CC1101][9] and [cc1101-e07-pi][7] repos for DIY wiring instructions.
 
 ### Supported Boards
 
@@ -338,14 +338,15 @@ The license is unspecified. Citing one of the original authors:
 ## Links
 
 - [Blog & other projects][2]
-- [CC1101 E07 module][1]
+- [CC1101 E07 433 MHz module][1]
+- [CC1101 E07 868/915 MHz module][10]
 - [ESP32C3-CC1101 hardware][9]
 - [cc1101-e07-pi hardware][7]
 - [everblu-meters (original)][5]
 - [everblu-meters-esp8266 (psykokwak fork)][6]
 - [everblu-meters-pi][8]
 
-[1]: https://www.cdebyte.com/products/E07-M1101S
+[1]: https://www.cdebyte.com/products/E07-400T10S
 [2]: https://hallard.me
 [3]: https://oshpark.com/shared_projects/BVwV2j3b
 [4]: http://www.lamaisonsimon.fr/wiki/doku.php?id=maison2:compteur_d_eau:compteur_d_eau
@@ -354,3 +355,4 @@ The license is unspecified. Citing one of the original authors:
 [7]: https://github.com/hallard/cc1101-e07-pi
 [8]: https://github.com/hallard/everblu-meters-pi
 [9]: https://github.com/hallard/ESP32C3-CC1101
+[10]: https://www.cdebyte.com/products/E07-900T10S
